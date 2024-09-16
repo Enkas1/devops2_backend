@@ -3,4 +3,3 @@ psycopg2-binary==2.9.8
 python-dotenv
 flake8
 pytest
-flask_sqlalchemy
