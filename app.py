@@ -2,41 +2,46 @@ from flask import Flask, request, render_template, url_for, session, redirect, j
 import os
 import re
 import psycopg2
+from datetime import datetime
 from functions import *
 
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
 
-
 @app.route("/", methods=["GET", "POST"])
 def render_index():
     return render_template("index.html")
 
-@app.route("/adminpage.html", methods=["POST", "GET", "PUT"])
+@app.route("/adminpage.html", methods=["GET", "POST"])
 def render_adminpage():
-    activity = request.form.get("activity")
-    price = request.form.get("price")
-    
-    
-    if 'Lägg till en aktivitet' in request.form.values():
-        if admin_add_activity(activity, price):
-            return render_template("adminpage.html", message="Aktivitet tillagd")
-        else:
-            return render_template("adminpage.html", message="Något gick fel med att lägga till aktivitet")
-              
-    elif 'Ta bort aktivitet' in request.form.values():
-        if admin_delete_activity(activity):
-            return render_template("adminpage.html", message="Aktivitet raderad")
-        else:
-            return render_template("adminpage.html", message="Något gick fel med att radera aktiviteten")
-    elif 'Nytt pris' in request.form.values():
-        if admin_change_price(activity, price):
-            return render_template("adminpage.html", message="Priset uppdaterat")
-        else:
-            return render_template("adminpage.html", message="Något gick fel med att uppdatera priset")
+    if request.method == "POST":
+        activity = request.form.get("activity")
+        price = request.form.get("price")
 
-    return render_template("adminpage.html", message="Välkommen Admin")
+        if 'Lägg till en aktivitet' in request.form.values():
+            if admin_add_activity(activity, price):
+                return render_template("adminpage.html", message="Aktivitet tillagd")
+            else:
+                return render_template("adminpage.html", message="Något gick fel med att lägga till aktivitet")
+        elif 'Ta bort aktivitet' in request.form.values():
+            if admin_delete_activity(activity):
+                return render_template("adminpage.html", message="Aktivitet raderad")
+            else:
+                return render_template("adminpage.html", message="Något gick fel med att radera aktiviteten")
+        elif 'Nytt pris' in request.form.values():
+            if admin_change_price(activity, price):
+                return render_template("adminpage.html", message="Priset uppdaterat")
+            else:
+                return render_template("adminpage.html", message="Något gick fel med att uppdatera priset")
+
+    # Handle GET requests
+    contact_messages = fetch_contact_messages_from_database()
+    print(contact_messages)  # Debugging: print the fetched messages
+    if contact_messages:
+        return render_template('adminpage.html', contact_messages=contact_messages)
+    else:
+        return render_template('adminpage.html', contact_messages=[], message="No contact messages available.")
 
 @app.route("/inloggning.html", methods=["POST"])
 def render_inloggning():
@@ -49,7 +54,7 @@ def render_inloggad():
         password = request.form.get("password")
         session["email"] = email
 
-        if email and password: 
+        if email and password:
             if login_credentials_check(email, password):
                 admin_status = admin_or_not(email)
                 if admin_status:
@@ -67,7 +72,6 @@ def render_inloggad():
 @app.route("/activities.html", methods=["GET"])
 def render_activities():
     activities = fetch_activities_and_prices_from_database()
-    print(f"Fetched activities: {activities}") 
     if activities:
         return render_template("activities.html", activities=activities)
     else:
@@ -80,10 +84,9 @@ def render_registration():
 @app.route("/contact.html", methods=["POST", "GET"])
 def render_contact():
     if request.method == "POST":
-        # Kontrollera om filen meddelande.txt finns, annars skapas den
-        if not os.path.isfile("meddelanden.txt"):
-            with open("meddelanden.txt", "w", encoding="utf-8"):
-                pass  # Skapar filen om den inte finns
+        email = request.form.get("email")
+        phone = request.form.get("telefon")
+        message = request.form.get("message")
 
         # Regex-mönster för att validera e-postadress
         email_pattern = r"^[\w\.-]+@[\w\.-]+\.\w+$"
@@ -93,24 +96,24 @@ def render_contact():
         message_pattern = r"^(?=\s*\S)(.{3,}(?:\s+\S+){0,299}\s*)$"
 
         # Validera e-postadress
-        if not re.match(email_pattern, request.form["email"]):
-            return render_template("/contact.html", message="<span style='color: white;'>Felaktig e-postadress!</span>")
+        if not re.match(email_pattern, email):
+            return render_template("contact.html", message="Felaktig e-postadress!")
 
         # Validera telefonnummer
-        if not re.match(phone_pattern, request.form["telefon"]):
-            return render_template("/contact.html", message="<span style='color: white;'>Felaktigt telefonnummer, fyll i 10 siffror!</span>")
+        if not re.match(phone_pattern, phone):
+            return render_template("contact.html", message="Felaktigt telefonnummer, fyll i 10 siffror!")
 
         # Validera meddelandet
-        if not re.match(message_pattern, request.form["message"]):
-            return render_template("/contact.html", message="<span style='color: white;'>Meddelandet måste vara minst 3 tecken långt!</span>")
+        if not re.match(message_pattern, message):
+            return render_template("contact.html", message="Meddelandet måste vara minst 3 tecken långt!")
 
-        # Om allt är korrekt, spara datan
-        with open("meddelanden.txt", "a", encoding="utf-8") as file:
-            file.write(f"{request.form['email']}, {request.form['telefon']}, {request.form['message']}\n")
-        return render_template("/contact.html", message="<span style='color: white;'>Tack för ditt mail, vi återkommer inom kort.</span>")
+        # Spara data till databasen
+        if save_message_to_database(email, phone, message):
+            return render_template("contact.html", message="Tack för ditt meddelande, vi återkommer inom kort.")
+        else:
+            return render_template("contact.html", message="Ett fel uppstod vid spara meddelandet. Försök igen senare.")
     else:
         return render_template("contact.html")
-  
 @app.route("/logincancellation.html", methods=["GET", "POST"])
 def render_logincancellation():
     if request.method == "POST":
@@ -127,15 +130,16 @@ def render_logincancellation():
 
 @app.route("/loginboka.html", methods=["GET"])
 def render_loginboka():
-    return render_template("loginboka.html")
+    activities = fetch_activities_and_prices_from_database()
+    today = datetime.now().strftime('%Y-%m-%d')
+    return render_template("loginboka.html", activities=activities, today=today)
 
 @app.route("/logincontact.html", methods=["GET", "POST"])
 def render_logincontact():
     if request.method == "POST":
-        # Kontrollera om filen meddelande.txt finns, annars skapas den
-        if not os.path.isfile("meddelanden.txt"):
-            with open("meddelanden.txt", "w", encoding="utf-8"):
-                pass  # Skapar filen om den inte finns
+        email = request.form.get("email")
+        phone = request.form.get("telefon")
+        message = request.form.get("message")
 
         # Regex-mönster för att validera e-postadress
         email_pattern = r"^[\w\.-]+@[\w\.-]+\.\w+$"
@@ -145,28 +149,29 @@ def render_logincontact():
         message_pattern = r"^(?=\s*\S)(.{3,}(?:\s+\S+){0,299}\s*)$"
 
         # Validera e-postadress
-        if not re.match(email_pattern, request.form["email"]):
-            return render_template("/logincontact.html", message="<span style='color: white;'>Felaktig e-postadress!</span>")
+        if not re.match(email_pattern, email):
+            return render_template("logincontact.html", message="Felaktig e-postadress!")
 
         # Validera telefonnummer
-        if not re.match(phone_pattern, request.form["telefon"]):
-            return render_template("/logincontact.html", message="<span style='color: white;'>Felaktigt telefonnummer, fyll i 10 siffror!</span>")
+        if not re.match(phone_pattern, phone):
+            return render_template("logincontact.html", message="Felaktigt telefonnummer, fyll i 10 siffror!")
 
         # Validera meddelandet
-        if not re.match(message_pattern, request.form["message"]):
-            return render_template("/logincontact.html", message="<span style='color: white;'>Meddelandet måste vara minst 3 tecken långt!</span>")
+        if not re.match(message_pattern, message):
+            return render_template("logincontact.html", message="Meddelandet måste vara minst 3 tecken långt!")
 
-        # Om allt är korrekt, spara datan
-        with open("meddelanden.txt", "a", encoding="utf-8") as file:
-            file.write(f"{request.form['email']}, {request.form['telefon']}, {request.form['message']}\n")
-        return render_template("/logincontact.html", message="<span style='color: white;'>Tack för ditt mail, vi återkommer inom kort.</span>")
+        # Spara data till databasen
+        if save_message_to_database(email, phone, message):
+            return render_template("logincontact.html", message="Tack för ditt meddelande, vi återkommer inom kort.")
+        else:
+            return render_template("logincontact.html", message="Ett fel uppstod vid spara meddelandet. Försök igen senare.")
     else:
         return render_template("logincontact.html")
 
 @app.route("/loginindex.html", methods=["GET"])
 def render_loginindex():
     return render_template("loginindex.html")
-    
+
 @app.route("/loginbookingconfirmed.html", methods=["POST", "GET"])
 def de_login_booking():
     activity = request.form.get("activity")
@@ -180,7 +185,7 @@ def de_login_booking():
     email_pattern = r"^[\w\.-]+@[\w\.-]+\.\w+$"
     # Regex-mönster för att validera telefonnummer (exakt 10 siffror)
     phone_pattern = r"^\d{10}$"
-    
+
 
     # Validera e-postadress
     if not re.match(email_pattern, request.form["email"]):
@@ -189,7 +194,7 @@ def de_login_booking():
     # Validera telefonnummer
     if not re.match(phone_pattern, request.form["phone"]):
         return render_template("/loginboka.html", message="<span style='color: white;'>Felaktigt telefonnummer, fyll i 10 siffror!</span>")
-    
+
     if input_data:
         conn = psycopg2.connect(**conn_details)
         cur = conn.cursor()
@@ -199,7 +204,7 @@ def de_login_booking():
             pass
         else:
             return render_template("/loginboka.html", message="<span style='color: white;'>Tiden upptagen, välj en annan tid</span>")
-    
+
     if input_data:
         if booking_confirmed(activity, date, time, email, phone):
             conn = psycopg2.connect(**conn_details)
@@ -219,7 +224,7 @@ def de_login_booking():
         else:
             return render_template("loginbookingconfirmed.html", message="Det gick inte att lägga till bokningsinformationen.")
     else:
-        return render_template("loginbookingconfirmed.html", message="Nödvändiga uppgifter saknas.")  # Vi når aldrig denna???    
+        return render_template("loginbookingconfirmed.html", message="Nödvändiga uppgifter saknas.")  # Vi når aldrig denna???
 
 @app.route("/loginbookingfail.html", methods=["POST", "GET"])
 def render_loginbookingfail():
@@ -238,7 +243,7 @@ def register_user_status():
     password_pattern = r"^(?=\s*\S)(.{5,}(?:\s+\S+){0,30}\s*)$"
     # Regex-mönster för att validera telefonnummer (exakt 10 siffror)
     phone_pattern = r"^\d{10}$"
-    
+
 
     # Validera e-postadress
     if not re.match(email_pattern, request.form["email"]):
@@ -287,4 +292,4 @@ def get_user_bookings():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)  
+    app.run(debug=True)
